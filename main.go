@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/naoya/go-pit"
@@ -55,13 +56,49 @@ func getToken(consumerKey, consumerSecret string) (*AccessToken, error) {
 	return &t, nil
 }
 
-func getTimeline(token string, max_id int) (*Timeline, error) {
+type TimelineOptions struct {
+	UserId             int
+	ScreenName         string
+	SinceId            int
+	Count              int
+	MaxId              int
+	TrimUser           bool
+	ExcludeReplies     bool
+	ContributorDetails bool
+	IncludeRts         bool
+}
+
+func getTimeline(token string, options TimelineOptions) (*Timeline, error) {
 	values := url.Values{}
-	values.Add("count", 200)
-	if max_id != 0 {
-		values.Add("max_id", max_id)
+	if options.UserId != 0 {
+		values.Add("user_id", strconv.Itoa(options.UserId))
 	}
-	req, _ := http.NewRequest("GET", Endpoint+"/1.1/statuses/home_timeline.json", nil)
+	if options.ScreenName != "" {
+		values.Add("screen_name", options.ScreenName)
+	}
+	if options.SinceId != 0 {
+		values.Add("since_id", strconv.Itoa(options.SinceId))
+	}
+	if options.Count != 0 {
+		values.Add("count", strconv.Itoa(options.Count))
+	}
+	if options.MaxId != 0 {
+		values.Add("max_id", strconv.Itoa(options.MaxId))
+	}
+	if options.TrimUser != true {
+		values.Add("trim_user", strconv.FormatBool(options.TrimUser))
+	}
+	if options.ExcludeReplies != true {
+		values.Add("exclude_replies", strconv.FormatBool(options.ExcludeReplies))
+	}
+	if options.ContributorDetails != true {
+		values.Add("contributor_details", strconv.FormatBool(options.ContributorDetails))
+	}
+	if options.IncludeRts != false {
+		values.Add("include_rts", strconv.FormatBool(options.IncludeRts))
+	}
+
+	req, _ := http.NewRequest("GET", Endpoint+"/1.1/statuses/user_timeline.json", nil)
 	req.Header.Add("Authorization", "Bearer "+token)
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 	req.URL.RawQuery = values.Encode()
@@ -72,6 +109,17 @@ func getTimeline(token string, max_id int) (*Timeline, error) {
 		fmt.Println("Error\ttype:request timeline\terr:%v", err)
 		return nil, err
 	}
+
+	defer res.Body.Close()
+
+	decoder := json.NewDecoder(res.Body)
+	var timeline interface{}
+	if err = decoder.Decode(&timeline); err != nil {
+		fmt.Println("Error\ttype:decode timeline\terr:%v", err)
+		return nil, err
+	}
+	fmt.Println(timeline)
+	return &Timeline{}, nil
 }
 
 func main() {
@@ -87,5 +135,10 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-	fmt.Println(token.AccessToken)
+
+	timeline, err := getTimeline(token.AccessToken, TimelineOptions{ScreenName: "hirokazu_miyaji", Count: 200})
+	if err != nil {
+		os.Exit(1)
+	}
+	fmt.Println(timeline)
 }
