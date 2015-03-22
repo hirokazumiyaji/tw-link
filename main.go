@@ -1,125 +1,104 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
-	"strings"
 
+	"github.com/garyburd/go-oauth/oauth"
 	"github.com/naoya/go-pit"
 )
 
-const Endpoint = "https://api.twitter.com"
+const endpoint = "https://api.twitter.com"
 
-type AccessToken struct {
-	TokenType   string `json:"token_type"`
-	AccessToken string `json:"access_token"`
+var httpRegexp = regexp.MustCompile("https?://.*")
+
+type tweet struct {
+	Text string `json:"text"`
+	Id   string `json:"id_str"`
+	User struct {
+		ScreenName      string `json:"screen_name"`
+		ProfileImageUrl string `json:"profile_image_url"`
+	} `json:"user"`
 }
 
-type Timeline struct {
-	Coordinates interface{} `json:"coordinates"`
-	Truncated   bool        `json:"truncated"`
-	CreatedAt   string      `json:"created_at"`
-	Favorited   bool        `json:"favorited"`
-	IdStr       string      `json:"id_str"`
-	Text        string      `json:"text"`
+var oauthClient = oauth.Client{
+	TemporaryCredentialRequestURI: endpoint + "/oauth/request_token",
+	ResourceOwnerAuthorizationURI: endpoint + "/oauth/authenticate",
+	TokenRequestURI:               endpoint + "/oauth/access_token",
 }
 
-func getToken(consumerKey, consumerSecret string) (*AccessToken, error) {
-	bearerToken := base64.StdEncoding.EncodeToString([]byte(consumerKey + ":" + consumerSecret))
-
-	values := url.Values{}
-	values.Add("grant_type", "client_credentials")
-	req, err := http.NewRequest("POST", Endpoint+"/oauth2/token", strings.NewReader(values.Encode()))
-	req.Header.Add("Authorization", "Basic "+bearerToken)
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
-	client := http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error\ttype:request token\terr:%v", err)
-		return nil, err
-	}
-
-	defer res.Body.Close()
-
-	decoder := json.NewDecoder(res.Body)
-	var t AccessToken
-	if err = decoder.Decode(&t); err != nil {
-		fmt.Println("Error\ttype:decode token\terr:%v", err)
-		return nil, err
-	}
-
-	return &t, nil
-}
-
-type TimelineOptions struct {
-	UserId             int
-	ScreenName         string
-	SinceId            int
+type Options struct {
 	Count              int
+	SinceId            int
 	MaxId              int
 	TrimUser           bool
 	ExcludeReplies     bool
 	ContributorDetails bool
-	IncludeRts         bool
+	IncludeEntities    bool
 }
 
-func getTimeline(token string, options TimelineOptions) (*Timeline, error) {
+func (o *Options) Values() url.Values {
 	values := url.Values{}
-	if options.UserId != 0 {
-		values.Add("user_id", strconv.Itoa(options.UserId))
+	if o.Count != 0 {
+		values.Add("count", strconv.Itoa(o.Count))
 	}
-	if options.ScreenName != "" {
-		values.Add("screen_name", options.ScreenName)
+	if o.SinceId != 0 {
+		values.Add("since_id", strconv.Itoa(o.SinceId))
 	}
-	if options.SinceId != 0 {
-		values.Add("since_id", strconv.Itoa(options.SinceId))
+	if o.MaxId != 0 {
+		values.Add("max_id", strconv.Itoa(o.MaxId))
 	}
-	if options.Count != 0 {
-		values.Add("count", strconv.Itoa(options.Count))
+	if o.TrimUser != true {
+		values.Add("trim_user", strconv.FormatBool(o.TrimUser))
 	}
-	if options.MaxId != 0 {
-		values.Add("max_id", strconv.Itoa(options.MaxId))
+	if o.ExcludeReplies != true {
+		values.Add("exclude_replies", strconv.FormatBool(o.ExcludeReplies))
 	}
-	if options.TrimUser != true {
-		values.Add("trim_user", strconv.FormatBool(options.TrimUser))
+	if o.ContributorDetails != true {
+		values.Add("contributor_details", strconv.FormatBool(o.ContributorDetails))
 	}
-	if options.ExcludeReplies != true {
-		values.Add("exclude_replies", strconv.FormatBool(options.ExcludeReplies))
+	if o.IncludeEntities != false {
+		values.Add("include_rts", strconv.FormatBool(o.IncludeEntities))
 	}
-	if options.ContributorDetails != true {
-		values.Add("contributor_details", strconv.FormatBool(options.ContributorDetails))
-	}
-	if options.IncludeRts != false {
-		values.Add("include_rts", strconv.FormatBool(options.IncludeRts))
-	}
+	return values
+}
 
-	req, _ := http.NewRequest("GET", Endpoint+"/1.1/statuses/user_timeline.json", nil)
-	req.Header.Add("Authorization", "Bearer "+token)
-	req.Header.Add("Content-Type", "application/json; charset=utf-8")
-	req.URL.RawQuery = values.Encode()
-	client := http.Client{}
-
-	res, err := client.Do(req)
+func getHomeTimeline(token *oauth.Credentials, options *Options) ([]tweet, error) {
+	url_ := endpoint + "/1.1/statuses/home_timeline.json"
+	values := options.Values()
+	oauthClient.SignParam(token, "GET", url_, values)
+	url_ = url_ + "?" + values.Encode()
+	res, err := http.Get(url_)
 	if err != nil {
-		fmt.Println("Error\ttype:request timeline\terr:%v", err)
 		return nil, err
 	}
 
 	defer res.Body.Close()
-
-	decoder := json.NewDecoder(res.Body)
-	var timeline interface{}
-	if err = decoder.Decode(&timeline); err != nil {
-		fmt.Println("Error\ttype:decode timeline\terr:%v", err)
+	if res.StatusCode != 200 {
 		return nil, err
 	}
-	fmt.Println(timeline)
-	return &Timeline{}, nil
+
+	var timeline []tweet
+	if err = json.NewDecoder(res.Body).Decode(&timeline); err != nil {
+		return nil, err
+	}
+	return timeline, nil
+}
+
+func filterTimeline(timeline []tweet) []tweet {
+	_timeline := make([]tweet, len(timeline))
+
+	for _, t := range timeline {
+		if httpRegexp.MatchString(t.Text) {
+			_timeline = append(_timeline, t)
+		}
+	}
+	return _timeline
 }
 
 func main() {
@@ -128,17 +107,27 @@ func main() {
 		fmt.Println("pit Error %v", err)
 		os.Exit(1)
 	}
-	consumerKey := config["consumer_key"]
-	consumerSecret := config["consumer_secret"]
+	oauthClient.Credentials.Token = config["consumer_key"]
+	oauthClient.Credentials.Secret = config["consumer_secret"]
 
-	token, err := getToken(consumerKey, consumerSecret)
+	oauthToken, isFoundOAuthToken := config["access_token"]
+	oauthSecret, isFoundOAuthSecret := config["access_token_secret"]
+	var token *oauth.Credentials
+	if isFoundOAuthToken && isFoundOAuthSecret {
+		token = &oauth.Credentials{oauthToken, oauthSecret}
+	} else {
+		token, err = oauthClient.RequestTemporaryCredentials(http.DefaultClient, "", nil)
+		if err != nil {
+			fmt.Println("failed to request temporary credentials:", err)
+			os.Exit(1)
+		}
+	}
+
+	timeline, err := getHomeTimeline(token, &Options{Count: 200})
 	if err != nil {
 		os.Exit(1)
 	}
 
-	timeline, err := getTimeline(token.AccessToken, TimelineOptions{ScreenName: "hirokazu_miyaji", Count: 200})
-	if err != nil {
-		os.Exit(1)
-	}
+	timeline = filterTimeline(timeline)
 	fmt.Println(timeline)
 }
