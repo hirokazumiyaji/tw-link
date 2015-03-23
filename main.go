@@ -3,13 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/garyburd/go-oauth/oauth"
+	"github.com/google/go-github/github"
 	"github.com/naoya/go-pit"
 )
 
@@ -129,5 +132,20 @@ func main() {
 	}
 
 	timeline = filterTimeline(timeline)
-	fmt.Println(timeline)
+
+	md := "| ScreenName | Tweet |\n| --- | --- |\n"
+	for _, t := range timeline {
+		if t.Text != "" {
+			md += fmt.Sprintf("| %s | %s |\n", t.User.ScreenName, strings.Replace(t.Text, "\n", " ", -1))
+		}
+	}
+
+	client := github.NewClient(nil)
+	html, _, err := client.Markdown(md, nil)
+	if err != nil {
+		fmt.Println("failed to request github markdown:", err)
+		os.Exit(1)
+	}
+	html = "<!DOCTYPE html>\n<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\n</head>\n<body>\n" + html + "</body>\n"
+	ioutil.WriteFile("index.html", []byte(html), 0644)
 }
